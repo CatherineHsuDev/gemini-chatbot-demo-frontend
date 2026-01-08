@@ -1,3 +1,4 @@
+// App.tsx
 import { useState } from "react";
 import "./index.css";
 
@@ -13,6 +14,11 @@ function App() {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const baseUrl = import.meta.env.VITE_API_BASE_URL;
+  if (!baseUrl) {
+    throw new Error("VITE_API_BASE_URL is not set");
+  }
+
   const appendMessage = (role: Role, text: string) => {
     setMessages((prev) => [...prev, { role, text }]);
   };
@@ -24,15 +30,20 @@ function App() {
     appendMessage("user", trimmed);
     setPrompt("");
     setLoading(true);
+    let timeoutId: number | undefined;
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/chat", {
+      const controller = new AbortController();
+      timeoutId = window.setTimeout(() => controller.abort(), 60_000);
+
+      const res = await fetch(`${baseUrl}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
         body: JSON.stringify({ prompt: trimmed }),
+        signal: controller.signal,
       });
 
       // 專門處理 429（被 rate limit 擋掉）
@@ -63,9 +74,17 @@ function App() {
       const data: { response: string } = await res.json();
       appendMessage("ai", data.response);
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        appendMessage("ai", "Network timeout. Please try again.");
+        return;
+      }
+
       const msg = err instanceof Error ? err.message : JSON.stringify(err);
       appendMessage("ai", `Network error: ${msg}`);
     } finally {
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
       setLoading(false);
     }
   };
